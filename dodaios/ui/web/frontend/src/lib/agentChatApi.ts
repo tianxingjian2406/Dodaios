@@ -613,8 +613,14 @@ export async function resolveAgentChatApproval(
   );
 }
 
-/** The person's answer to an agent's question: one option, or their own words. */
-export type QuestionAnswerInput = { optionIndex: number } | { text: string };
+/**
+ * The person's answer to an agent's question: one option, their own words, or
+ * the picks of a multi-select question (with their own words beside them).
+ */
+export type QuestionAnswerInput =
+  | { optionIndex: number }
+  | { text: string }
+  | { optionIndices: number[]; text?: string };
 
 function questionUrl(sessionId: string, questionId: string): string {
   return `/api/agent-chat/sessions/${encodeURIComponent(sessionId)}/questions/${encodeURIComponent(questionId)}`;
@@ -629,7 +635,11 @@ export async function answerAgentChatQuestion(
 ): Promise<void> {
   const body = {
     index,
-    ...("optionIndex" in answer ? { option_index: answer.optionIndex } : { text: answer.text }),
+    ...("optionIndex" in answer
+      ? { option_index: answer.optionIndex }
+      : "optionIndices" in answer
+        ? { option_indices: answer.optionIndices, ...(answer.text ? { text: answer.text } : {}) }
+        : { text: answer.text }),
   };
   await json(
     await fetch(questionUrl(sessionId, questionId), {
