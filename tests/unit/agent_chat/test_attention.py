@@ -199,6 +199,7 @@ async def _settle(attention: Any) -> None:
         await asyncio.sleep(0)
     while attention._tasks:  # noqa: SLF001 — wait for the scheduled publishes
         await asyncio.gather(*list(attention._tasks))  # noqa: SLF001
+        await asyncio.sleep(0)  # let the done callbacks drop the finished tasks
 
 
 async def test_aggregates_cards_from_every_runtime() -> None:
@@ -347,6 +348,7 @@ async def test_done_is_told_only_for_the_agents_own_chat() -> None:
         published.append(event)
 
     attention = install(svc, publish=publish, society=_Society)
+    attention.done_grace_s = 0
     for sid in ("society:scout", "society:scout:with:brain"):
         await svc._emit(sid, _ev("user_message", text="go"))
         await svc._emit(sid, _ev("turn_started", turn_id=f"t-{sid}"))
@@ -354,6 +356,37 @@ async def test_done_is_told_only_for_the_agents_own_chat() -> None:
     await _settle(attention)
     told = [(e.transition, e.session_id) for e in published if e.transition]
     assert told == [("done", "society:scout")]
+
+
+async def test_a_turn_that_ends_by_asking_is_told_as_a_question_not_as_done() -> None:
+    svc = _service()
+    published: list[Any] = []
+
+    async def publish(event: Any) -> None:
+        published.append(event)
+
+    attention = install(svc, publish=publish, society=_Society)
+    attention.done_grace_s = 0.05
+    sid = "society:scout"
+    await svc._emit(sid, _ev("user_message", text="go"))
+    await svc._emit(sid, _ev("turn_started", turn_id="t1"))
+    await svc._emit(sid, _ev("turn_finished", turn_id="t1", status="done"))
+    # A fence-only CLI's end-of-turn card lands right after the turn finished.
+    await svc._emit(sid, _ev(
+        "question_required", turn_id="t1", question_id="q-end", questions=[_QUESTION], deferred=True,
+    ))
+    await _settle(attention)
+    told = [e.transition for e in published if e.transition]
+    assert told == ["needs_input"]
+
+
+def test_a_series_is_never_offered_for_one_tap() -> None:
+    board = AttentionBoard()
+    board.observe("s", _ev("question_required", question_id="q", questions=[_QUESTION, _QUESTION]))
+    assert board.items()[0].detail["single"] is False
+    lone = AttentionBoard()
+    lone.observe("s", _ev("question_required", question_id="q", questions=[_QUESTION]))
+    assert lone.items()[0].detail["single"] is True
 
 
 async def test_open_cards_are_rebuilt_from_the_log_after_a_restart() -> None:

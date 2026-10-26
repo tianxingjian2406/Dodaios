@@ -68,6 +68,10 @@ THROTTLE_S: Final[float] = 5.0
 #: window that sent it may be gone without having said so.
 FOCUS_TTL_S: Final[float] = 300.0
 
+#: How long a "done" waits for the card a finished turn may still open (an
+#: end-of-turn question or plan card arrives just after ``turn_finished``).
+DONE_GRACE_S: Final[float] = 1.5
+
 #: How much of a chat's log is replayed after a restart. Open cards sit at the
 #: end of a chat: a later turn closes every card before it.
 SEED_TAIL: Final[int] = 400
@@ -161,8 +165,9 @@ def _question_detail(questions: list[Any], answers: list[Any] | None) -> tuple[s
     # A question this inbox cannot answer with one tap (several picks, a form)
     # still lists here; it is answered on its card.
     shape = str(current.get("type") or current.get("kind") or "single")
-    multi = bool(current.get("multi_select") or current.get("multiSelect"))
-    single = shape in ("single", "choice") and not multi
+    multi = bool(current.get("multi") or current.get("multi_select") or current.get("multiSelect"))
+    # Only a lone question: a series is reviewed and sent as a whole on its card.
+    single = shape in ("single", "choice") and not multi and len(questions) == 1
     detail = {
         "question": _line(current.get("question"), 300),
         "options": labels,
@@ -460,6 +465,7 @@ class Attention:
         self._tasks: set[asyncio.Task[Any]] = set()
         self._seeded = False
         self._seed_lock: asyncio.Lock | None = None
+        self.done_grace_s = DONE_GRACE_S
 
     # ----------------------------------------------------------- listening
 
@@ -481,9 +487,21 @@ class Attention:
             await self.ensure_seeded()
             note: dict[str, Any] = {}
             for change in changes:
-                note = await self._transition(change) or note
-            count = len(await self.items())
-            await self._emit(count, note)
+                if change.what != "done":
+                    note = await self._transition(change) or note
+            await self._emit(len(await self.items()), note)
+            done = [change for change in changes if change.what == "done"]
+            if not done:
+                return
+            # A turn that ends by asking (an end-of-turn card) is not finished
+            # news: that card's own notice tells it instead.
+            await asyncio.sleep(self.done_grace_s)
+            for change in done:
+                if self.board.open_in(change.session_id):
+                    continue
+                told = await self._transition(change)
+                if told:
+                    await self._emit(len(await self.items()), told)
         except Exception:  # noqa: BLE001 — a notifier must never break the chat it watches
             log.warning("agent attention: could not publish a change", exc_info=True)
 

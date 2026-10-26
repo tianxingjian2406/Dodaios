@@ -42,10 +42,19 @@ export function syncAttentionCount(count: number): void {
 }
 
 let inflight: Promise<void> | null = null;
+/** A change arrived while a read was on its way: read once more after it. */
+let again = false;
 
-/** Read the list again (one request at a time; a call during one joins it). */
+/**
+ * Read the list again, one request at a time. A call during a read asks for
+ * one more read after it, so a change the running read may have missed is
+ * never lost.
+ */
 export function refreshAttention(): Promise<void> {
-  if (inflight) return inflight;
+  if (inflight) {
+    again = true;
+    return inflight;
+  }
   if (!useAttentionStore.getState().list) useAttentionStore.setState({ status: "loading" });
   inflight = fetchAttention()
     .then((list) => {
@@ -58,6 +67,10 @@ export function refreshAttention(): Promise<void> {
     })
     .finally(() => {
       inflight = null;
+      if (again) {
+        again = false;
+        void refreshAttention();
+      }
     });
   return inflight;
 }
@@ -76,5 +89,6 @@ export function forgetAttentionItem(item: AttentionItem): void {
 /** For tests: back to an empty, unread store. */
 export function resetAttentionStore(): void {
   inflight = null;
+  again = false;
   useAttentionStore.setState({ count: 0, list: null, status: "idle", readAt: 0 });
 }

@@ -147,3 +147,28 @@ describe("focus report", () => {
     expect(currentFocus().agentId).toBe("");
   });
 });
+
+describe("list reads", () => {
+  it("reads once more when a change arrives during a read, so it is never lost", async () => {
+    const { refreshAttention } = await import("./attentionStore");
+    const bodies = [
+      { items: [], count: 0 },
+      { items: [], count: 1 },
+    ];
+    let release: (() => void) | null = null;
+    const fetchMock = vi.fn(async () => {
+      const body = bodies.shift() ?? { items: [], count: 1 };
+      if (fetchMock.mock.calls.length === 1) await new Promise<void>((resolve) => { release = resolve; });
+      return new Response(JSON.stringify(body), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const first = refreshAttention();
+    void refreshAttention(); // a change lands while the first read is out
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(release).not.toBeNull());
+    release!();
+    await first;
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(useAttentionStore.getState().count).toBe(1));
+  });
+});
