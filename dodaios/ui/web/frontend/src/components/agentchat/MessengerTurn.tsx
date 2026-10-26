@@ -3,11 +3,11 @@ import { BookmarkPlus, CircleAlert, Clock3, Feather, NotebookPen, SlidersHorizon
 import { ChatMarkdown } from "./ChatMarkdown";
 import { CredentialCard } from "./CredentialCard";
 import { QuestionCard } from "./QuestionCard";
-import type { ApprovalDecision } from "@/lib/agentChatApi";
+import { ApprovalActionCard, type ApprovalDecide } from "./actionCard/ApprovalActionCard";
 import type { TurnItem } from "./reduce";
 import { actionNoticeOf, presenceOf, type ActionNotice } from "./messengerPresence";
 import { BotStage, useDoneFlourish, useTypingPresence } from "./botStage/BotStage";
-import { ApprovalPrompt, PROSE, THREAD_MEDIA } from "@/components/agentic/threads/ThreadTimeline";
+import { PROSE, THREAD_MEDIA } from "@/components/agentic/threads/ThreadTimeline";
 import { SubagentCard } from "@/components/agentic/threads/ThreadSubagents";
 import { isSubagentCall } from "@/components/agentic/threads/subagents";
 import { useT } from "@/i18n";
@@ -29,7 +29,7 @@ export const MessengerTurn = memo(function MessengerTurn({ turn, avatar, color, 
   avatar: ReactNode;
   /** The agent's colour, for the accents of the scenes. */
   color: string;
-  onDecide: (approvalId: string, decision: ApprovalDecision) => void | Promise<void>;
+  onDecide: ApprovalDecide;
   /** Memory receipts posted after the turn: each a "Noted" quill line that opens the file. */
   memoryLinks?: MemoryLink[];
 }) {
@@ -48,7 +48,8 @@ export const MessengerTurn = memo(function MessengerTurn({ turn, avatar, color, 
       if (block.kind !== "tool") return null;
       if (block.credential) return <CredentialCard key={block.callId} credential={block.credential} />;
       if (block.question) return <QuestionCard key={block.callId} question={block.question} />;
-      if (block.approval && block.approval.decision === null) return <ApprovalPrompt key={block.callId} block={block} onDecide={onDecide} />;
+      // Open, the card asks; answered, it stays as the one line that says what happened.
+      if (block.approval) return <ApprovalActionCard key={block.callId} block={block} onDecide={onDecide} />;
       if (isSubagentCall(block)) return <SubagentCard key={block.callId} block={block} turn={turn} />;
       const notice = actionNoticeOf(block);
       if (!notice) return null;
